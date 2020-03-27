@@ -105,12 +105,20 @@ func connectSCTP(dest string, timeout time.Duration) {
 
 	fmt.Println("addrd", *addr)
 
+	/* laddr := &sctp.SCTPAddr{
+		Port: addr.Port + 200,
+	} */
+	// conn, err := sctp.DialSCTP("sctp", laddr, addr)
 	conn, err := sctp.DialSCTPExt("sctp", nil, addr, sctp.InitMsg{MaxInitTimeout: uint16(timeout.Milliseconds())})
+	fmt.Println("Dialed")
 	if err == nil {
+		fmt.Println("Closing")
 		conn.Close()
+		fmt.Println("Closed")
 		os.Exit(0)
 	}
 
+	fmt.Println("Error")
 	if syscallErr, ok := err.(syscall.Errno); ok {
 		if syscallErr.Timeout() {
 			fmt.Fprintf(os.Stderr, "TIMEOUT\n")
