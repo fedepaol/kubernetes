@@ -81,6 +81,7 @@ var _ = SIGDescribe("NetworkPolicy [LinuxOnly]", func() {
 			testCanConnect(f, f.Namespace, "client-can-connect-81", service, 81, tcp)
 
 			testCanConnect(f, f.Namespace, "client-can-connect-sctp-10100", service, 10100, sctp)
+			fmt.Println("can connect 10100")
 			testCanConnect(f, f.Namespace, "client-can-connect-sctp-10101", service, 10101, sctp)
 		})
 
@@ -1654,53 +1655,48 @@ func createServerPodAndService(f *framework.Framework, namespace *v1.Namespace, 
 		})
 	}
 
-	udpCounter := 0
 	for _, sctpPort := range sctpPorts {
-		probe := &v1.Probe{
-			InitialDelaySeconds: 10,
-			TimeoutSeconds:      30,
-			PeriodSeconds:       10,
-			SuccessThreshold:    1,
-			FailureThreshold:    3,
-			Handler: v1.Handler{
-				HTTPGet: &v1.HTTPGetAction{
-					Path: "/healthz",
-					Port: intstr.IntOrString{IntVal: int32(sctpPort.readinessPort)},
-				},
-			},
-		}
-
-		container := v1.Container{
+		containers = append(containers, v1.Container{
 			Name:  fmt.Sprintf("%s-container-sctp-%d", podName, sctpPort.port),
 			Image: imageutils.GetE2EImage(imageutils.Agnhost),
-			Args: []string{"netexec",
-				fmt.Sprintf("--http-port=%d", int32(sctpPort.readinessPort)),
-				fmt.Sprintf("--sctp-port=%d", sctpPort.port),
-				fmt.Sprintf("--udp-port=%d", 8080+udpCounter),
+			Args:  []string{"porter"},
+			Env: []v1.EnvVar{
+				{
+					Name:  fmt.Sprintf("SERVE_PORT_%d", sctpPort.readinessPort),
+					Value: "foo",
+				},
+				{
+					Name:  fmt.Sprintf("SCTP_SERVE_PORT_%d", sctpPort.port),
+					Value: "foo",
+				},
 			},
 			Ports: []v1.ContainerPort{
 				{
-					Name:          "http",
-					ContainerPort: int32(sctpPort.readinessPort),
-				},
-				{
-					Name:          "sctp",
 					ContainerPort: int32(sctpPort.port),
+					Name:          fmt.Sprintf("sctp-%d", sctpPort.port),
 					Protocol:      v1.ProtocolSCTP,
 				},
 			},
-			LivenessProbe:  probe,
-			ReadinessProbe: probe,
-		}
-		containers = append(containers, container)
+			ReadinessProbe: &v1.Probe{
+				Handler: v1.Handler{
+					HTTPGet: &v1.HTTPGetAction{
+						Path: "/",
+						Port: intstr.IntOrString{
+							IntVal: int32(sctpPort.readinessPort),
+						},
+						Scheme: v1.URISchemeHTTP,
+					},
+				},
+			},
+		})
+
 		// Build the Service Ports for the service.
 		servicePorts = append(servicePorts, v1.ServicePort{
-			Name:       fmt.Sprintf("%s-sctp-%d", podName, sctpPort.port),
+			Name:       fmt.Sprintf("%s-%d", podName, sctpPort.port),
 			Port:       int32(sctpPort.port),
 			TargetPort: intstr.FromInt(sctpPort.port),
 			Protocol:   v1.ProtocolSCTP,
 		})
-		udpCounter++
 	}
 
 	ginkgo.By(fmt.Sprintf("Creating a server pod %s in namespace %s", podName, namespace.Name))
@@ -1804,6 +1800,8 @@ func createNetworkClientPodWithRestartPolicy(f *framework.Framework, namespace *
 							fmt.Sprintf("%s.%s:%d", targetService.Name, targetService.Namespace, targetPort),
 							"--protocol",
 							"sctp",
+							"--timeout",
+							"2s",
 						},
 					},
 				},
